@@ -58,6 +58,13 @@ def main():
     apply_p.add_argument("--profile", type=str, default="", help="Texto del perfil tecnologico")
     apply_p.add_argument("--headless", action="store_true", help="Modo sin interfaz")
 
+    # --- update-profile ---
+    up_p = sub.add_parser("update-profile", help="Actualizar perfil en plataformas (LinkedIn)")
+    up_p.add_argument("--headline", type=str, default="", help="Nuevo titular profesional")
+    up_p.add_argument("--about", type=str, default="", help="Nueva seccion 'Acerca de'")
+    up_p.add_argument("--skills", type=str, default="", help="Skills separadas por coma")
+    up_p.add_argument("--platform", type=str, default="linkedin", help="Plataforma a actualizar")
+
     # --- doctor ---
     sub.add_parser("doctor", help="Verificar estado del sistema")
 
@@ -89,6 +96,14 @@ def main():
             cv_path=args.cv,
             profile=args.profile,
             headless=args.headless,
+        ))
+
+    elif args.command == "update-profile":
+        asyncio.run(_update_profile(
+            platform=args.platform,
+            headline=args.headline,
+            about=args.about,
+            skills=args.skills,
         ))
 
     elif args.command == "doctor":
@@ -192,6 +207,31 @@ async def _apply(url: str, platform: str, cv_path: str | None, profile: str, hea
         print(f"  ✗ Fallo: {result.error or 'No se pudo completar'}")
     if result.captcha and result.captcha.detected:
         print(f"  ⚠ CAPTCHA: {result.captcha.captcha_type.value} - {result.captcha.detail}")
+
+
+async def _update_profile(platform: str, headline: str, about: str, skills: str):
+    from backend.profile_updater import ProfileData
+
+    skills_list = [s.strip() for s in skills.split(",") if s.strip()] if skills else None
+    data = ProfileData(
+        headline=headline or None,
+        about=about or None,
+        skills=skills_list,
+    )
+
+    if not data.headline and not data.about and not data.skills:
+        print("  Proporciona al menos un campo: --headline, --about, o --skills")
+        return
+
+    if platform == "linkedin":
+        from backend.profile_updater.linkedin_updater import LinkedInProfileUpdater
+
+        updater = LinkedInProfileUpdater()
+        print(f"  Actualizando perfil de LinkedIn...")
+        ok = await updater.update_profile(data)
+        print(f"  {'✓ Perfil actualizado' if ok else '✗ Fallo al actualizar'}")
+    else:
+        print(f"  Plataforma '{platform}' no soportada aun")
 
 
 async def _doctor():
