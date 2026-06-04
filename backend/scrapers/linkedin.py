@@ -6,59 +6,12 @@ from backend.scrapers.base import BaseScraper
 
 logger = logging.getLogger(__name__)
 
-# LinkedIn cambia sus selectores frecuentemente.
-# Estrategias por orden de prioridad para cada campo.
-JOB_CARD_SELECTORS = [
-    "li[data-occludable-job-id]",           # selector clásico
-    "li.jobs-search-results__job-card",     # variante 2024+
-    "div.job-card-container",               # variante reciente
-    "article.job-card",                     # variante article
-    "[data-job-id]",                        # basado en data attr
-    "li[data-job-id]",                      # otra variante
-    "a.job-card-list__title",               # enlace directo en lista
-]
-
-TITLE_SELECTORS = [
-    "a[data-tracking-control-name='public_jobs_jserp-result_search-card']",
-    "a.job-card-list__title",
-    "a[data-anonymize='job-title']",
-    "a[id^='job-title-']",
-    "a.base-card__full-link",
-    "h3 a",
-    "a.job-title",
-    "h3.base-search-card__title",
-]
-
-COMPANY_SELECTORS = [
-    "h4 a",
-    "a[data-tracking-control-name='public_jobs_jserp-result_search-card'] span",
-    "span.job-card-container__primary-description",
-    "a.job-card-container__company-name",
-    "h4.base-search-card__subtitle",
-    "[data-anonymize='company-name']",
-    ".job-card-container__primary-description",
-    "span[class*='company-name']",
-]
-
-LOCATION_SELECTORS = [
-    "span.job-card-container__metadata-wrapper .bulleted",
-    "span.job-card-container__metadata-wrapper",
-    "span.job-search-card__location",
-    ".base-search-card__metadata",
-    "span[class*='location']",
-    "[data-anonymize='location']",
-    ".job-card-container__metadata-item",
-]
-
-DESC_SELECTORS = [
-    "div.show-more-less-html__markup",
-    "div.job-view-layout",
-    "article.jobs-description__container",
-    "#job-details",
-    ".jobs-description-content",
-    "div[class*='description']",
-    "section.job-description",
-]
+JOB_CARD = "div.job-search-card"
+TITLE = "h3.base-search-card__title"
+LINK = "a.base-card__full-link"
+COMPANY = "h4.base-search-card__subtitle"
+LOCATION = "div.base-search-card__metadata"
+DESC = "div.show-more-less-html__markup"
 
 
 class LinkedInScraper(BaseScraper):
@@ -80,10 +33,14 @@ class LinkedInScraper(BaseScraper):
             await page.goto(url, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(random.randint(3000, 5000))
 
-            cards = await self._find_cards(page)
+            await self._close_modal(page)
+
+            cards = await page.query_selector_all(JOB_CARD)
             if not cards:
-                logger.warning("No se encontraron tarjetas de trabajo con ningún selector")
-                await page.screenshot(path=f"data/linkedin_debug_{datetime.now():%Y%m%d_%H%M%S}.png")
+                logger.warning("No se encontraron tarjetas de trabajo")
+                fname = f"data/linkedin_debug_{datetime.now():%Y%m%d_%H%M%S}.png"
+                await page.screenshot(path=fname)
+                logger.info(f"Screenshot guardado: {fname}")
                 return results
 
             logger.info(f"Encontradas {len(cards)} tarjetas")
@@ -91,6 +48,8 @@ class LinkedInScraper(BaseScraper):
 
             for card in cards:
                 try:
+                    await page.evaluate("(el) => el.scrollIntoView({block: 'center'})", card)
+                    await page.wait_for_timeout(500)
                     await card.click()
                     await page.wait_for_timeout(random.randint(1500, 2500))
                     data = await self._extract_job_data(page, card)
@@ -105,40 +64,31 @@ class LinkedInScraper(BaseScraper):
 
         return results
 
-    async def _find_cards(self, page: Page):
-        for selector in JOB_CARD_SELECTORS:
-            try:
-                cards = await page.query_selector_all(selector)
-                if cards and len(cards) > 0:
-                    logger.info(f"Selector de tarjetas funcionando: '{selector}' → {len(cards)} cards")
-                    return cards
-            except Exception:
-                continue
-        return []
+    async def _close_modal(self, page: Page):
+        """Cierra el modal de login/registro que LinkedIn muestra a usuarios no autenticados."""
+        try:
+            close_btn = await page.query_selector(
+                "button[aria-label='Dismiss'], "
+                "button.modal__dismiss, "
+                "button[data-control-name='auth_modal_dismiss'], "
+                ".modal__overlay ~ button, "
+                "button[action='dismiss']"
+            )
+            if close_btn:
+                await close_btn.click()
+                await page.wait_for_timeout(1000)
+                logger.info("Modal de LinkedIn cerrado")
+        except Exception:
+            pass
 
-    async def _first_text(self, card: Page, selectors: list[str]) -> str:
-        for sel in selectors:
-            try:
-                el = await card.query_selector(sel)
-                if el:
-                    text = await el.inner_text()
-                    if text and text.strip():
-                        return text.strip()
-            except Exception:
-                continue
-        return ""
-
-    async def _first_attr(self, card: Page, selectors: list[str], attr: str = "href") -> str:
-        for sel in selectors:
-            try:
-                el = await card.query_selector(sel)
-                if el:
-                    val = await el.get_attribute(attr)
-                    if val and val.strip():
-                        return val.strip()
-            except Exception:
-                continue
-        return ""
+        # Cerrar por ESC si el modal sigue presente
+        try:
+            modal = await page.query_selector(".modal__overlay--visible")
+            if modal:
+                await page.keyboard.press("Escape")
+                await page.wait_for_timeout(1000)
+        except Exception:
+            pass
 
     async def _extract_job_data(self, page: Page, card) -> dict | None:
         result: dict = {
@@ -150,27 +100,33 @@ class LinkedInScraper(BaseScraper):
             "descripcion": "",
         }
 
-        link_sel = TITLE_SELECTORS + ["a[href*='/jobs/view']", "a.base-card__full-link"]
-        link = await self._first_attr(card, link_sel)
-        result["link"] = link.split("?")[0] if link and "?" in link else link or ""
-        result["cargo"] = await self._first_text(card, TITLE_SELECTORS)
-        result["empresa"] = await self._first_text(card, COMPANY_SELECTORS)
-        result["ubicacion"] = await self._first_text(card, LOCATION_SELECTORS)
+        link_el = await card.query_selector(LINK)
+        if link_el:
+            link = await link_el.get_attribute("href")
+            result["link"] = link.split("?")[0] if link and "?" in link else link or ""
+
+        title_el = await card.query_selector(TITLE)
+        if title_el:
+            result["cargo"] = (await title_el.inner_text()).strip()
+
+        company_el = await card.query_selector(COMPANY)
+        if company_el:
+            text = (await company_el.inner_text()).strip()
+            result["empresa"] = text.split("\n")[0].strip()
+
+        loc_el = await card.query_selector(LOCATION)
+        if loc_el:
+            text = (await loc_el.inner_text()).strip()
+            parts = text.split("\n")
+            result["ubicacion"] = parts[0].strip()
 
         if not result["cargo"] and not result["link"]:
             return None
 
         try:
-            desc = None
-            for sel in DESC_SELECTORS:
-                try:
-                    desc = await page.wait_for_selector(sel, timeout=3000)
-                    if desc:
-                        break
-                except Exception:
-                    continue
-            if desc:
-                result["descripcion"] = await desc.inner_text()
+            desc_el = await page.wait_for_selector(DESC, timeout=3000)
+            if desc_el:
+                result["descripcion"] = (await desc_el.inner_text()).strip()
         except Exception:
             pass
 
