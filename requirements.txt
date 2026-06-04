@@ -1,0 +1,28 @@
+# Core
+fastapi==0.115.*
+uvicorn[standard]==0.32.*
+python-dotenv==1.0.*
+
+# Scraping
+playwright==1.51.*
+
+# Database
+sqlalchemy[asyncio]==2.0.*
+asyncpg==0.30.*
+
+# AI
+openai==1.*
+google-genai==1.*
+
+# Notifications
+python-telegram-bot==21.*
+
+# Utils
+pydantic==2.*
+pydantic-settings==2.*
+
+# Dev
+pytest==8.*
+pytest-asyncio==0.25.*
+pytest-cov==6.*
+ruff==0.*
