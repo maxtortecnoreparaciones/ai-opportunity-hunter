@@ -8,8 +8,9 @@ def _import_scrapers():
     from .wellfound import WellfoundScraper
     from .getonboard import GetOnBoardScraper
     from .workana import WorkanaScraper
+    from .computrabajo import ComputrabajoScraper
     from .normalizer import JobNormalizer
-    return LinkedInScraper, WellfoundScraper, GetOnBoardScraper, WorkanaScraper, JobNormalizer
+    return LinkedInScraper, WellfoundScraper, GetOnBoardScraper, WorkanaScraper, ComputrabajoScraper, JobNormalizer
 
 
-LinkedInScraper, WellfoundScraper, GetOnBoardScraper, WorkanaScraper, JobNormalizer = _import_scrapers()
+LinkedInScraper, WellfoundScraper, GetOnBoardScraper, WorkanaScraper, ComputrabajoScraper, JobNormalizer = _import_scrapers()
